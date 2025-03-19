@@ -289,6 +289,7 @@ class FeatureClass:
 
         # Mean magnitude spectrogram (transposed to (time, freq))
         mean_mag = ((mag_left + mag_right) / 2).T
+        mean_mag_db = librosa.amplitude_to_db(mean_mag).T  # shape (time, freq)
 
         # Phase differences between channels
         phase_left = np.angle(stft_left)
@@ -300,13 +301,10 @@ class FeatureClass:
         cos_phase = np.cos(phase_diff).T
 
         # Interchannel level differences (in dB)
-        # Adding a small epsilon to avoid taking log of zero.
-        eps = 1e-8
-        ild = (20 * np.log10(mag_left + eps) - 20 * np.log10(mag_right + eps)).T
+        ild = (librosa.amplitude_to_db(mag_left) - librosa.amplitude_to_db(mag_right)).T
 
         # Stack features along a new axis: (channels, time, frequency)
-        features = np.stack([mean_mag, sin_phase, cos_phase, ild], axis=0)
-        return features
+        return np.stack([mean_mag_db, sin_phase, cos_phase, ild], axis=0)
 
 
     def _spectrogram(self, audio_input, _nb_frames):
