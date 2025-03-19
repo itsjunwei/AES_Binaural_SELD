@@ -1,0 +1,17 @@
+*.wav
+*.csv
+*.h5
+*.mat
+*.ipynb
+/wandb
+/models_audio
+/results_audio
+*.npy
+*.pyc
+/DCASE2024_SELD_dataset
+/DCASE2024_SELD_salsalite
+/images
+/__pycache__
+__pycache__
+/logs
+/csv_logs
