@@ -247,6 +247,68 @@ class FeatureClass:
         """
         return 2 ** ((x - 1).bit_length())
 
+    def compute_binaural_msc(X, T_w=3, F_w=3):
+        """
+        Compute the Magnitude-Squared Coherence (MSC) for binaural (2-channel) STFT data.
+        
+        The MSC measures the linear correlation between the left and right signals 
+        as a function of time and frequency, yielding values between 0 and 1.
+        
+        Parameters:
+            X (ndarray): Binaural STFT data of shape (2, T, F), where 2 corresponds 
+                        to the left and right channels.
+            T_w (int, optional): Time window size for local averaging (in frames). Default is 3.
+            F_w (int, optional): Frequency window size for local averaging (in bins). Default is 3.
+        
+        Returns:
+            gamma (ndarray): MSC at each time-frequency bin of shape (T, F).
+        
+        Raises:
+            ValueError: If input X does not have shape (2, T, F).
+        """
+        from scipy.signal import convolve2d
+        if X.ndim != 3 or X.shape[0] != 2:
+            raise ValueError(f"Input X must be a 3D array of shape (2, T, F) for binaural audio, but got shape {X.shape}.")
+        
+        # Extract time and frequency dimensions
+        T = X.shape[1]
+        F = X.shape[2]
+        
+        # Create an averaging kernel for local smoothing over time and frequency
+        kernel = np.ones((2 * T_w + 1, 2 * F_w + 1), dtype=np.float32)
+        kernel_size = kernel.size
+        
+        # Pad the STFT data to handle edge effects in convolution
+        pad_T, pad_F = T_w, F_w
+        X_padded = np.pad(X, ((0, 0), (pad_T, pad_T), (pad_F, pad_F)), mode='reflect')
+        
+        # Precompute the local averaged auto-power spectral densities for each channel
+        S_ii = np.zeros((2, T, F), dtype=np.float32)
+        for m in range(2):
+            Xm_abs_sq = np.abs(X_padded[m]) ** 2
+            # Convolve to perform local averaging over both time and frequency
+            S_ii_m = convolve2d(Xm_abs_sq, kernel, mode='valid')
+            S_ii[m] = S_ii_m / kernel_size
+        
+        # Compute the cross power spectral density (CPSD) between left and right channels
+        X0 = X_padded[0]
+        X1_conj = np.conj(X_padded[1])
+        S_01 = X0 * X1_conj
+        # Average the CPSD locally by convolving the real and imaginary parts separately
+        S_01_real = convolve2d(S_01.real, kernel, mode='valid')
+        S_01_imag = convolve2d(S_01.imag, kernel, mode='valid')
+        S_01 = (S_01_real + 1j * S_01_imag) / kernel_size
+        
+        # Compute the magnitude-squared coherence: |S_01|^2 / (S_00 * S_11)
+        numerator = np.abs(S_01) ** 2
+        denominator = S_ii[0] * S_ii[1]
+        
+        # Avoid division by zero by adding a small constant (if necessary)
+        epsilon = 1e-8
+        gamma = numerator / (denominator + epsilon)
+        
+        return gamma
+
     def _binaural_features(self, audio_input, _nb_frames):
         """
         Compute a feature stack from a binaural audio input, concatenating:
@@ -289,7 +351,7 @@ class FeatureClass:
 
         # Mean magnitude spectrogram (transposed to (time, freq))
         mean_mag = ((mag_left + mag_right) / 2).T
-        mean_mag_db = librosa.amplitude_to_db(mean_mag).T  # shape (time, freq)
+        mean_mag_db = librosa.amplitude_to_db(mean_mag)  # shape (time, freq)
 
         # Phase differences between channels
         phase_left = np.angle(stft_left)
@@ -302,9 +364,11 @@ class FeatureClass:
 
         # Interchannel level differences (in dB)
         ild = (librosa.amplitude_to_db(mag_left) - librosa.amplitude_to_db(mag_right)).T
+        
+        ic = compute_msc_recursive(np.stack([stft_left.T, stft_right.T], axis=0))
 
         # Stack features along a new axis: (channels, time, frequency)
-        return np.stack([mean_mag_db, sin_phase, cos_phase, ild], axis=0)
+        return np.stack([mean_mag_db, sin_phase, cos_phase, ild, ic], axis=0)
 
 
     def _spectrogram(self, audio_input, _nb_frames):
